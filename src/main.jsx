@@ -6,6 +6,7 @@ import { calculatePlayerRisk, summarizePortfolio, buildReviewsFromPlayers } from
 import { defaultRiskRules } from './riskRules.js';
 import { mapRowsToEvents, mapRowsToPlayers, parseCsv, sampleCsv } from './csvUtils.js';
 import { getTemplateByDecision, interventionTemplates } from './interventionTemplates.js';
+import { buildRiskReport, downloadMarkdownReport } from './reportUtils.js';
 import './styles.css';
 
 const tabs = ['Dashboard', 'Players', 'Review Queue', 'Events', 'Reports', 'Rules', 'Templates', 'Import CSV'];
@@ -82,7 +83,7 @@ function App() {
         {activeTab === 'Players' && <PlayersTable players={filteredPlayers} onSelectPlayer={setSelectedPlayer} />}
         {activeTab === 'Review Queue' && <ReviewQueue reviews={reviews} players={enrichedPlayers} onSelectPlayer={setSelectedPlayer} updateReviewCase={updateReviewCase} />}
         {activeTab === 'Events' && <EventsTable events={rawEvents} onSelectPlayerById={(playerId) => setSelectedPlayer(enrichedPlayers.find((player) => player.id === playerId))} />}
-        {activeTab === 'Reports' && <Reports summary={summary} reviews={reviews} />}
+        {activeTab === 'Reports' && <Reports summary={summary} players={enrichedPlayers} reviews={reviews} events={rawEvents} />}
         {activeTab === 'Rules' && <Rules rules={rules} setRules={setRules} />}
         {activeTab === 'Templates' && <Templates />}
         {activeTab === 'Import CSV' && <ImportCsv onImport={handleCsvImport} />}
@@ -131,8 +132,9 @@ function EventsTable({ events, onSelectPlayerById }) {
   return <Panel title="Events timeline" subtitle="Sample or imported player events used by the MVP risk engine"><div className="table-wrap"><table><thead><tr><th>Time</th><th>Player</th><th>Type</th><th>Amount</th><th>Metadata</th></tr></thead><tbody>{events.map((event) => <tr key={event.id} className="clickable-row" onClick={() => onSelectPlayerById(event.playerId)}><td>{event.timestamp}</td><td>{event.playerId}</td><td>{event.type}</td><td>{event.amount ? `$${event.amount}` : '—'}</td><td>{event.meta}</td></tr>)}</tbody></table></div></Panel>;
 }
 
-function Reports({ summary, reviews }) {
-  return <section className="stack"><Panel title="Compliance summary" subtitle="Export-ready narrative for validation conversations"><div className="report-box"><h4>RiskGuard daily summary</h4><p>{summary.highRiskPlayers} high-risk players and {summary.mediumRiskPlayers} medium-risk players were detected in the current portfolio. RiskGuard recommends manual review for high-risk cases and responsible gaming actions where loss-chasing, long sessions or deposit spikes are detected.</p><p>Open cases: {reviews.filter((review) => review.status !== 'Closed').length}. Closed cases: {reviews.filter((review) => review.status === 'Closed').length}. Action suggested: {reviews.filter((review) => review.status === 'Action suggested').length}.</p><p>This demo is designed for iGaming risk, compliance and operations teams. It does not provide gambling functionality and uses mock or imported sample data only.</p></div></Panel><Panel title="Suggested next product modules"><ul className="clean-list"><li>API data ingestion</li><li>Team roles and review ownership</li><li>Exportable PDF/CSV compliance reports</li><li>Jurisdiction-specific RG policies</li></ul></Panel></section>;
+function Reports({ summary, players, reviews, events }) {
+  const report = buildRiskReport({ summary, players, reviews, events });
+  return <section className="stack"><Panel title="Compliance summary" subtitle="Export-ready narrative for validation conversations"><div className="report-box"><h4>RiskGuard daily summary</h4><p>{summary.highRiskPlayers} high-risk players and {summary.mediumRiskPlayers} medium-risk players were detected in the current portfolio. RiskGuard recommends manual review for high-risk cases and responsible gaming actions where loss-chasing, long sessions or deposit spikes are detected.</p><p>Open cases: {reviews.filter((review) => review.status !== 'Closed').length}. Closed cases: {reviews.filter((review) => review.status === 'Closed').length}. Action suggested: {reviews.filter((review) => review.status === 'Action suggested').length}.</p><p>This demo is designed for iGaming risk, compliance and operations teams. It does not provide gambling functionality and uses mock or imported sample data only.</p><button className="primary-button" onClick={() => downloadMarkdownReport(report)}>Export markdown report</button></div></Panel><Panel title="Report preview" subtitle="Markdown generated from current portfolio state"><textarea className="report-preview" readOnly value={report} /></Panel><Panel title="Suggested next product modules"><ul className="clean-list"><li>API data ingestion</li><li>Team roles and review ownership</li><li>Exportable PDF compliance reports</li><li>Jurisdiction-specific RG policies</li></ul></Panel></section>;
 }
 
 function Rules({ rules, setRules }) {
