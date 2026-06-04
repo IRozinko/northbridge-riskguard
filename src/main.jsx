@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { AlertTriangle, BarChart3, CheckCircle2, FileText, Gauge, Search, ShieldAlert, Upload, UsersRound } from 'lucide-react';
+import { AlertTriangle, BarChart3, CheckCircle2, Gauge, Search, ShieldAlert, Upload, UsersRound, X } from 'lucide-react';
 import { players as seedPlayers, events as seedEvents, reviews as seedReviews } from './mockData.js';
 import { calculatePlayerRisk, summarizePortfolio, buildReviewsFromPlayers } from './riskEngine.js';
 import { defaultRiskRules } from './riskRules.js';
@@ -16,6 +16,7 @@ function App() {
   const [rawEvents, setRawEvents] = useState(seedEvents);
   const [reviews, setReviews] = useState(seedReviews);
   const [rules, setRules] = useState(defaultRiskRules);
+  const [selectedPlayer, setSelectedPlayer] = useState(null);
 
   const enrichedPlayers = useMemo(() => {
     return rawPlayers.map((player) => calculatePlayerRisk(player, rawEvents.filter((event) => event.playerId === player.id), rules));
@@ -36,8 +37,12 @@ function App() {
     setRawPlayers(importedPlayers);
     setRawEvents(importedEvents);
     setReviews(buildReviewsFromPlayers(enrichedImportedPlayers));
+    setSelectedPlayer(null);
     setActiveTab('Dashboard');
   }
+
+  const selectedPlayerEvents = selectedPlayer ? rawEvents.filter((event) => event.playerId === selectedPlayer.id) : [];
+  const selectedPlayerReviews = selectedPlayer ? reviews.filter((review) => review.playerId === selectedPlayer.id) : [];
 
   return (
     <div className="app-shell">
@@ -74,14 +79,23 @@ function App() {
           </div>
         </header>
 
-        {activeTab === 'Dashboard' && <Dashboard summary={summary} players={enrichedPlayers} reviews={reviews} />}
-        {activeTab === 'Players' && <PlayersTable players={filteredPlayers} />}
-        {activeTab === 'Review Queue' && <ReviewQueue reviews={reviews} players={enrichedPlayers} />}
-        {activeTab === 'Events' && <EventsTable events={rawEvents} />}
+        {activeTab === 'Dashboard' && <Dashboard summary={summary} players={enrichedPlayers} reviews={reviews} onSelectPlayer={setSelectedPlayer} />}
+        {activeTab === 'Players' && <PlayersTable players={filteredPlayers} onSelectPlayer={setSelectedPlayer} />}
+        {activeTab === 'Review Queue' && <ReviewQueue reviews={reviews} players={enrichedPlayers} onSelectPlayer={setSelectedPlayer} />}
+        {activeTab === 'Events' && <EventsTable events={rawEvents} onSelectPlayerById={(playerId) => setSelectedPlayer(enrichedPlayers.find((player) => player.id === playerId))} />}
         {activeTab === 'Reports' && <Reports players={enrichedPlayers} summary={summary} />}
         {activeTab === 'Rules' && <Rules rules={rules} setRules={setRules} />}
         {activeTab === 'Import CSV' && <ImportCsv onImport={handleCsvImport} />}
       </main>
+
+      {selectedPlayer && (
+        <PlayerProfileModal
+          player={selectedPlayer}
+          events={selectedPlayerEvents}
+          reviews={selectedPlayerReviews}
+          onClose={() => setSelectedPlayer(null)}
+        />
+      )}
     </div>
   );
 }
@@ -98,7 +112,7 @@ function MetricCard({ icon, label, value, tone }) {
   );
 }
 
-function Dashboard({ summary, players, reviews }) {
+function Dashboard({ summary, players, reviews, onSelectPlayer }) {
   const topRisks = [...players].sort((a, b) => b.riskScore - a.riskScore).slice(0, 5);
   return (
     <section className="stack">
@@ -113,10 +127,10 @@ function Dashboard({ summary, players, reviews }) {
 
       <div className="two-col">
         <Panel title="Highest risk players" subtitle="Players requiring risk/compliance attention">
-          {topRisks.map((player) => <PlayerCard key={player.id} player={player} />)}
+          {topRisks.map((player) => <PlayerCard key={player.id} player={player} onClick={() => onSelectPlayer(player)} />)}
         </Panel>
         <Panel title="Open review queue" subtitle="Manual checks suggested by RiskGuard">
-          {reviews.filter((review) => review.status !== 'Closed').map((review) => <ReviewCard key={review.id} review={review} player={players.find((player) => player.id === review.playerId)} />)}
+          {reviews.filter((review) => review.status !== 'Closed').map((review) => <ReviewCard key={review.id} review={review} player={players.find((player) => player.id === review.playerId)} onSelectPlayer={onSelectPlayer} />)}
         </Panel>
       </div>
     </section>
@@ -139,9 +153,9 @@ function RiskBadge({ level }) {
   return <span className={`risk-badge ${level.toLowerCase()}`}>{level}</span>;
 }
 
-function PlayerCard({ player }) {
+function PlayerCard({ player, onClick }) {
   return (
-    <article className="player-card">
+    <article className="player-card clickable" onClick={onClick}>
       <div className="card-title-line">
         <div>
           <h4>{player.id}</h4>
@@ -156,9 +170,9 @@ function PlayerCard({ player }) {
   );
 }
 
-function ReviewCard({ review, player }) {
+function ReviewCard({ review, player, onSelectPlayer }) {
   return (
-    <article className="review-card">
+    <article className="review-card clickable" onClick={() => player && onSelectPlayer?.(player)}>
       <div className="card-title-line">
         <div>
           <h4>{review.title}</h4>
@@ -172,7 +186,7 @@ function ReviewCard({ review, player }) {
   );
 }
 
-function PlayersTable({ players }) {
+function PlayersTable({ players, onSelectPlayer }) {
   return (
     <Panel title="Player risk table" subtitle="Risk score, flags, activity and recommended action">
       <div className="table-wrap">
@@ -180,7 +194,7 @@ function PlayersTable({ players }) {
           <thead><tr><th>Player</th><th>Risk</th><th>Segment</th><th>Deposits</th><th>Losses</th><th>Session</th><th>Flags</th><th>Recommended action</th></tr></thead>
           <tbody>
             {players.map((player) => (
-              <tr key={player.id}>
+              <tr key={player.id} className="clickable-row" onClick={() => onSelectPlayer(player)}>
                 <td><strong>{player.id}</strong><small>{player.country}</small></td>
                 <td><RiskBadge level={player.riskLevel} /><small>{player.riskScore}</small></td>
                 <td>{player.segment}</td>
@@ -198,17 +212,17 @@ function PlayersTable({ players }) {
   );
 }
 
-function ReviewQueue({ reviews, players }) {
+function ReviewQueue({ reviews, players, onSelectPlayer }) {
   return (
     <Panel title="Review queue" subtitle="Manual checks for risk, responsible gaming, fraud and bonus abuse">
       <div className="card-grid">
-        {reviews.map((review) => <ReviewCard key={review.id} review={review} player={players.find((player) => player.id === review.playerId)} />)}
+        {reviews.map((review) => <ReviewCard key={review.id} review={review} player={players.find((player) => player.id === review.playerId)} onSelectPlayer={onSelectPlayer} />)}
       </div>
     </Panel>
   );
 }
 
-function EventsTable({ events }) {
+function EventsTable({ events, onSelectPlayerById }) {
   return (
     <Panel title="Events timeline" subtitle="Sample or imported player events used by the MVP risk engine">
       <div className="table-wrap">
@@ -216,7 +230,7 @@ function EventsTable({ events }) {
           <thead><tr><th>Time</th><th>Player</th><th>Type</th><th>Amount</th><th>Metadata</th></tr></thead>
           <tbody>
             {events.map((event) => (
-              <tr key={event.id}>
+              <tr key={event.id} className="clickable-row" onClick={() => onSelectPlayerById(event.playerId)}>
                 <td>{event.timestamp}</td><td>{event.playerId}</td><td>{event.type}</td><td>{event.amount ? `$${event.amount}` : '—'}</td><td>{event.meta}</td>
               </tr>
             ))}
@@ -239,7 +253,6 @@ function Reports({ summary }) {
       </Panel>
       <Panel title="Suggested next product modules">
         <ul className="clean-list">
-          <li>Player profile with risk explanation timeline</li>
           <li>Case notes and audit trail</li>
           <li>Responsible gaming intervention templates</li>
           <li>API data ingestion</li>
@@ -298,6 +311,83 @@ function ImportCsv({ onImport }) {
         <textarea className="csv-textarea" value={csvText} onChange={(event) => setCsvText(event.target.value)} />
       </div>
     </Panel>
+  );
+}
+
+function PlayerProfileModal({ player, events, reviews, onClose }) {
+  return (
+    <div className="modal-backdrop">
+      <div className="player-modal">
+        <div className="modal-header">
+          <div>
+            <p className="eyebrow">Player profile</p>
+            <h3>{player.id}</h3>
+            <span>{player.country} · {player.segment} · Last activity: {player.lastActivity || '—'}</span>
+          </div>
+          <button className="icon-button" onClick={onClose}><X size={18} /></button>
+        </div>
+
+        <div className="profile-grid">
+          <div className="profile-summary-card">
+            <RiskBadge level={player.riskLevel} />
+            <strong>{player.riskScore}</strong>
+            <span>Risk score</span>
+          </div>
+          <div className="profile-kpi"><span>Deposits</span><strong>${player.totalDeposits}</strong></div>
+          <div className="profile-kpi"><span>Net loss</span><strong>${player.netLoss}</strong></div>
+          <div className="profile-kpi"><span>Session time</span><strong>{player.sessionMinutes} min</strong></div>
+          <div className="profile-kpi"><span>Failed withdrawals</span><strong>{player.failedWithdrawals}</strong></div>
+          <div className="profile-kpi"><span>Bonus claims</span><strong>{player.bonusClaims}</strong></div>
+        </div>
+
+        <div className="two-col modal-two-col">
+          <Panel title="Risk explanation" subtitle="Triggered rules and why the player was flagged">
+            {player.triggeredRules?.length ? player.triggeredRules.map((rule) => (
+              <div className="rule-explanation" key={rule.id}>
+                <div className="card-title-line">
+                  <strong>{rule.label}</strong>
+                  <span>+{rule.points}</span>
+                </div>
+                <p>{rule.description}</p>
+                <small>{rule.field} {rule.operator} {rule.threshold}</small>
+              </div>
+            )) : <p className="muted">No risk rules triggered.</p>}
+          </Panel>
+
+          <Panel title="Recommended action" subtitle="Suggested responsible next step">
+            <div className="recommended-action large">{player.recommendedAction}</div>
+            <div className="flags">{player.flags.map((flag) => <span key={flag}>{flag}</span>)}</div>
+          </Panel>
+        </div>
+
+        <div className="two-col modal-two-col">
+          <Panel title="Event timeline" subtitle="Events connected to this player">
+            <div className="mini-timeline">
+              {events.length ? events.map((event) => (
+                <div className="mini-timeline-item" key={event.id}>
+                  <span>{event.timestamp}</span>
+                  <strong>{event.type}{event.amount ? ` · $${event.amount}` : ''}</strong>
+                  <p>{event.meta}</p>
+                </div>
+              )) : <p className="muted">No events available.</p>}
+            </div>
+          </Panel>
+
+          <Panel title="Review context" subtitle="Open or generated review cases">
+            {reviews.length ? reviews.map((review) => (
+              <div className="review-context" key={review.id}>
+                <div className="card-title-line">
+                  <strong>{review.title}</strong>
+                  <span>{review.status}</span>
+                </div>
+                <p>{review.summary}</p>
+                <small>{review.owner} · Due: {review.dueDate}</small>
+              </div>
+            )) : <p className="muted">No review case yet.</p>}
+          </Panel>
+        </div>
+      </div>
+    </div>
   );
 }
 
