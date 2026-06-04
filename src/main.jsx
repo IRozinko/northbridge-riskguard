@@ -5,9 +5,10 @@ import { players as seedPlayers, events as seedEvents, reviews as seedReviews } 
 import { calculatePlayerRisk, summarizePortfolio, buildReviewsFromPlayers } from './riskEngine.js';
 import { defaultRiskRules } from './riskRules.js';
 import { mapRowsToEvents, mapRowsToPlayers, parseCsv, sampleCsv } from './csvUtils.js';
+import { getTemplateByDecision, interventionTemplates } from './interventionTemplates.js';
 import './styles.css';
 
-const tabs = ['Dashboard', 'Players', 'Review Queue', 'Events', 'Reports', 'Rules', 'Import CSV'];
+const tabs = ['Dashboard', 'Players', 'Review Queue', 'Events', 'Reports', 'Rules', 'Templates', 'Import CSV'];
 const reviewStatuses = ['Open', 'In progress', 'Action suggested', 'Closed'];
 const reviewDecisions = ['No decision yet', 'Monitor', 'Responsible gaming message', 'Suggest limits', 'Cooling-off review', 'Fraud review', 'Close as false positive'];
 
@@ -29,7 +30,11 @@ function App() {
   const [rules, setRules] = useState(defaultRiskRules);
   const [selectedPlayer, setSelectedPlayer] = useState(null);
 
-  const enrichedPlayers = useMemo(() => rawPlayers.map((player) => calculatePlayerRisk(player, rawEvents.filter((event) => event.playerId === player.id), rules)), [rawPlayers, rawEvents, rules]);
+  const enrichedPlayers = useMemo(
+    () => rawPlayers.map((player) => calculatePlayerRisk(player, rawEvents.filter((event) => event.playerId === player.id), rules)),
+    [rawPlayers, rawEvents, rules]
+  );
+
   const summary = useMemo(() => summarizePortfolio(enrichedPlayers, reviews), [enrichedPlayers, reviews]);
   const filteredPlayers = enrichedPlayers.filter((player) => `${player.id} ${player.country} ${player.segment} ${player.flags.join(' ')}`.toLowerCase().includes(query.toLowerCase()));
 
@@ -79,6 +84,7 @@ function App() {
         {activeTab === 'Events' && <EventsTable events={rawEvents} onSelectPlayerById={(playerId) => setSelectedPlayer(enrichedPlayers.find((player) => player.id === playerId))} />}
         {activeTab === 'Reports' && <Reports summary={summary} reviews={reviews} />}
         {activeTab === 'Rules' && <Rules rules={rules} setRules={setRules} />}
+        {activeTab === 'Templates' && <Templates />}
         {activeTab === 'Import CSV' && <ImportCsv onImport={handleCsvImport} />}
       </main>
 
@@ -87,9 +93,17 @@ function App() {
   );
 }
 
-function MetricCard({ icon, label, value, tone }) { return <div className={`metric-card ${tone || ''}`}><div className="metric-icon">{icon}</div><div><p>{label}</p><strong>{value}</strong></div></div>; }
-function Panel({ title, subtitle, children }) { return <section className="panel"><div className="panel-header"><h3>{title}</h3>{subtitle && <p>{subtitle}</p>}</div>{children}</section>; }
-function RiskBadge({ level }) { return <span className={`risk-badge ${level.toLowerCase()}`}>{level}</span>; }
+function MetricCard({ icon, label, value, tone }) {
+  return <div className={`metric-card ${tone || ''}`}><div className="metric-icon">{icon}</div><div><p>{label}</p><strong>{value}</strong></div></div>;
+}
+
+function Panel({ title, subtitle, children }) {
+  return <section className="panel"><div className="panel-header"><h3>{title}</h3>{subtitle && <p>{subtitle}</p>}</div>{children}</section>;
+}
+
+function RiskBadge({ level }) {
+  return <span className={`risk-badge ${level.toLowerCase()}`}>{level}</span>;
+}
 
 function Dashboard({ summary, players, reviews, onSelectPlayer }) {
   const topRisks = [...players].sort((a, b) => b.riskScore - a.riskScore).slice(0, 5);
@@ -101,7 +115,8 @@ function PlayerCard({ player, onClick }) {
 }
 
 function ReviewCard({ review, player, onSelectPlayer }) {
-  return <article className="review-card clickable" onClick={() => player && onSelectPlayer?.(player)}><div className="card-title-line"><div><h4>{review.title}</h4><p>{review.owner} · {review.status}</p></div><RiskBadge level={player?.riskLevel || 'Low'} /></div><p>{review.summary}</p><small>Player: {review.playerId} · Due: {review.dueDate} · Decision: {review.decision || 'No decision yet'}</small></article>;
+  const template = getTemplateByDecision(review.decision);
+  return <article className="review-card clickable" onClick={() => player && onSelectPlayer?.(player)}><div className="card-title-line"><div><h4>{review.title}</h4><p>{review.owner} · {review.status}</p></div><RiskBadge level={player?.riskLevel || 'Low'} /></div><p>{review.summary}</p><small>Player: {review.playerId} · Decision: {review.decision || 'No decision yet'} · Template: {template.title}</small></article>;
 }
 
 function PlayersTable({ players, onSelectPlayer }) {
@@ -109,7 +124,7 @@ function PlayersTable({ players, onSelectPlayer }) {
 }
 
 function ReviewQueue({ reviews, players, onSelectPlayer, updateReviewCase }) {
-  return <Panel title="Review queue" subtitle="Manual checks for risk, responsible gaming, fraud and bonus abuse"><div className="card-grid">{reviews.map((review) => <div className="case-card" key={review.id}><ReviewCard review={review} player={players.find((player) => player.id === review.playerId)} onSelectPlayer={onSelectPlayer} /><div className="case-actions"><select value={review.status} onChange={(event) => updateReviewCase(review.id, { status: event.target.value })}>{reviewStatuses.map((status) => <option key={status}>{status}</option>)}</select><select value={review.decision || 'No decision yet'} onChange={(event) => updateReviewCase(review.id, { decision: event.target.value })}>{reviewDecisions.map((decision) => <option key={decision}>{decision}</option>)}</select></div></div>)}</div></Panel>;
+  return <Panel title="Review queue" subtitle="Manual checks for risk, responsible gaming, fraud and bonus abuse"><div className="card-grid">{reviews.map((review) => <div className="case-card" key={review.id}><ReviewCard review={review} player={players.find((player) => player.id === review.playerId)} onSelectPlayer={onSelectPlayer} /><div className="case-actions"><select value={review.status} onChange={(event) => updateReviewCase(review.id, { status: event.target.value })}>{reviewStatuses.map((status) => <option key={status}>{status}</option>)}</select><select value={review.decision || 'No decision yet'} onChange={(event) => updateReviewCase(review.id, { decision: event.target.value, status: event.target.value === 'No decision yet' ? review.status : 'Action suggested' })}>{reviewDecisions.map((decision) => <option key={decision}>{decision}</option>)}</select></div><InterventionPreview decision={review.decision} /></div>)}</div></Panel>;
 }
 
 function EventsTable({ events, onSelectPlayerById }) {
@@ -117,12 +132,26 @@ function EventsTable({ events, onSelectPlayerById }) {
 }
 
 function Reports({ summary, reviews }) {
-  return <section className="stack"><Panel title="Compliance summary" subtitle="Export-ready narrative for validation conversations"><div className="report-box"><h4>RiskGuard daily summary</h4><p>{summary.highRiskPlayers} high-risk players and {summary.mediumRiskPlayers} medium-risk players were detected in the current portfolio. RiskGuard recommends manual review for high-risk cases and responsible gaming actions where loss-chasing, long sessions or deposit spikes are detected.</p><p>Open cases: {reviews.filter((review) => review.status !== 'Closed').length}. Closed cases: {reviews.filter((review) => review.status === 'Closed').length}. Action suggested: {reviews.filter((review) => review.status === 'Action suggested').length}.</p><p>This demo is designed for iGaming risk, compliance and operations teams. It does not provide gambling functionality and uses mock or imported sample data only.</p></div></Panel><Panel title="Suggested next product modules"><ul className="clean-list"><li>Responsible gaming intervention templates</li><li>API data ingestion</li><li>Team roles and review ownership</li><li>Exportable PDF/CSV compliance reports</li></ul></Panel></section>;
+  return <section className="stack"><Panel title="Compliance summary" subtitle="Export-ready narrative for validation conversations"><div className="report-box"><h4>RiskGuard daily summary</h4><p>{summary.highRiskPlayers} high-risk players and {summary.mediumRiskPlayers} medium-risk players were detected in the current portfolio. RiskGuard recommends manual review for high-risk cases and responsible gaming actions where loss-chasing, long sessions or deposit spikes are detected.</p><p>Open cases: {reviews.filter((review) => review.status !== 'Closed').length}. Closed cases: {reviews.filter((review) => review.status === 'Closed').length}. Action suggested: {reviews.filter((review) => review.status === 'Action suggested').length}.</p><p>This demo is designed for iGaming risk, compliance and operations teams. It does not provide gambling functionality and uses mock or imported sample data only.</p></div></Panel><Panel title="Suggested next product modules"><ul className="clean-list"><li>API data ingestion</li><li>Team roles and review ownership</li><li>Exportable PDF/CSV compliance reports</li><li>Jurisdiction-specific RG policies</li></ul></Panel></section>;
 }
 
 function Rules({ rules, setRules }) {
   function updateRule(id, field, value) { setRules((current) => current.map((rule) => rule.id === id ? { ...rule, [field]: field === 'threshold' || field === 'points' ? Number(value) : value } : rule)); }
   return <Panel title="Configurable risk rules" subtitle="Tune thresholds and points for validation scenarios"><div className="table-wrap"><table><thead><tr><th>Rule</th><th>Category</th><th>Field</th><th>Threshold</th><th>Points</th><th>Description</th></tr></thead><tbody>{rules.map((rule) => <tr key={rule.id}><td><strong>{rule.label}</strong></td><td>{rule.category}</td><td>{rule.field}</td><td><input className="inline-input" type="number" value={rule.threshold} onChange={(event) => updateRule(rule.id, 'threshold', event.target.value)} /></td><td><input className="inline-input" type="number" value={rule.points} onChange={(event) => updateRule(rule.id, 'points', event.target.value)} /></td><td>{rule.description}</td></tr>)}</tbody></table></div><button className="primary-button" onClick={() => setRules(defaultRiskRules)}>Reset default rules</button></Panel>;
+}
+
+function Templates() {
+  return <Panel title="Responsible gaming intervention templates" subtitle="Policy-safe suggested actions for case decisions"><div className="template-grid">{interventionTemplates.map((template) => <TemplateCard key={template.id} template={template} />)}</div></Panel>;
+}
+
+function TemplateCard({ template }) {
+  return <article className="template-card"><div className="card-title-line"><div><h4>{template.title}</h4><p>{template.decision} · {template.severity}</p></div></div><p>{template.goal}</p><h5>Internal checklist</h5><ul>{template.internalChecklist.map((item) => <li key={item}>{item}</li>)}</ul><h5>Player-facing message</h5><div className="message-preview">{template.operatorMessage}</div></article>;
+}
+
+function InterventionPreview({ decision }) {
+  const template = getTemplateByDecision(decision);
+  if (!decision || decision === 'No decision yet') return null;
+  return <div className="intervention-preview"><strong>{template.title}</strong><p>{template.goal}</p></div>;
 }
 
 function ImportCsv({ onImport }) {
@@ -132,7 +161,13 @@ function ImportCsv({ onImport }) {
 
 function CaseManagement({ review, updateReviewCase }) {
   const [notes, setNotes] = useState(review.notes || '');
-  return <div className="case-management"><div className="case-form-row"><label><span>Status</span><select value={review.status} onChange={(event) => updateReviewCase(review.id, { status: event.target.value })}>{reviewStatuses.map((status) => <option key={status}>{status}</option>)}</select></label><label><span>Decision</span><select value={review.decision || 'No decision yet'} onChange={(event) => updateReviewCase(review.id, { decision: event.target.value })}>{reviewDecisions.map((decision) => <option key={decision}>{decision}</option>)}</select></label></div><label className="case-notes"><span>Case notes</span><textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Add risk/compliance notes, decision rationale or next action..." /></label><button className="primary-button" onClick={() => updateReviewCase(review.id, { notes })}>Save notes</button><div className="audit-trail"><h4>Audit trail</h4>{(review.auditTrail || []).map((item, index) => <div className="audit-item" key={`${item.at}-${index}`}><span>{new Date(item.at).toLocaleString()}</span><strong>{item.action}</strong><small>{item.by}</small></div>)}</div></div>;
+  const template = getTemplateByDecision(review.decision);
+  function applyTemplate() {
+    const nextNotes = `${notes ? `${notes}\n\n` : ''}Suggested intervention: ${template.title}\nGoal: ${template.goal}\nChecklist:\n- ${template.internalChecklist.join('\n- ')}\n\nPlayer-facing message:\n${template.operatorMessage}`;
+    setNotes(nextNotes);
+    updateReviewCase(review.id, { notes: nextNotes, status: 'Action suggested' });
+  }
+  return <div className="case-management"><div className="case-form-row"><label><span>Status</span><select value={review.status} onChange={(event) => updateReviewCase(review.id, { status: event.target.value })}>{reviewStatuses.map((status) => <option key={status}>{status}</option>)}</select></label><label><span>Decision</span><select value={review.decision || 'No decision yet'} onChange={(event) => updateReviewCase(review.id, { decision: event.target.value, status: event.target.value === 'No decision yet' ? review.status : 'Action suggested' })}>{reviewDecisions.map((decision) => <option key={decision}>{decision}</option>)}</select></label></div><InterventionPreview decision={review.decision} /><label className="case-notes"><span>Case notes</span><textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Add risk/compliance notes, decision rationale or next action..." /></label><div className="button-row"><button className="primary-button" onClick={() => updateReviewCase(review.id, { notes })}>Save notes</button>{review.decision !== 'No decision yet' && <button className="secondary-button" onClick={applyTemplate}>Apply template to notes</button>}</div><div className="audit-trail"><h4>Audit trail</h4>{(review.auditTrail || []).map((item, index) => <div className="audit-item" key={`${item.at}-${index}`}><span>{new Date(item.at).toLocaleString()}</span><strong>{item.action}</strong><small>{item.by}</small></div>)}</div></div>;
 }
 
 function PlayerProfileModal({ player, events, reviews, onClose, updateReviewCase }) {
